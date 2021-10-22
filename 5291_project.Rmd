@@ -1,0 +1,17 @@
+---
+title: "5291_project"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(VIM)
+data <- read_csv("data/hmda_2017_ny_all-records_labels.csv")
+data <- subset(data, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19, 21:24,33:40,43:50,56:64,69:71,78))
+aggr(data)
+```
+
