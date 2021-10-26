@@ -13,28 +13,52 @@ library(VIM)
 library(glmnet)
 dat <- read_csv("/Users/yctang/Documents/Columbia/5291 Advanced data Analysis/project/data/hmda_2017_ny_all-records_labels.csv")
 #aggr(dat)
-dat <- subset(dat, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19, 21:27, 29, 31, 33:50, 51, 53, 54, 56:71, 69:71, 78))
-dat = dat %>% filter(action_taken == 1 | action_taken == 2 | action_taken == 3)
+dat <- subset(dat, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19:27, 29, 31, 33:50, 51, 53, 54, 56:71, 69:71, 78))
 #aggr(dat)
 dat <- drop_na(dat)
+# owner_occupancy: unknown == 0
+dat[dat$owner_occupancy == 3, ]$owner_occupancy <- 0
+# preapproval: not requested == 0
+dat[dat$preapproval == 2, ]$preapproval <- 0
+dat[dat$preapproval == 3, ]$preapproval <- 0
+# action_taken
+dat = dat %>% filter(action_taken == 1 | action_taken == 2 | action_taken == 3)
 dat[dat$action_taken == 2, ]$action_taken <- 1
 dat[dat$action_taken == 3, ]$action_taken <- 0
+# applicant_ethnicity: unknown == 0, hispanic/latino == 1, non hispanic/latino == 2
+dat[dat$applicant_ethnicity == 3, ]$applicant_ethnicity <- 0
+dat[dat$applicant_ethnicity == 4, ]$applicant_ethnicity <- 0
+# xex: unknown == 0, male == 1, female == 2
+dat[dat$applicant_sex == 3, ]$applicant_sex <- 0
+dat[dat$applicant_sex == 4, ]$applicant_sex <- 0
+# race: unknown == 0
+dat[dat$applicant_race_1 == 6, ]$applicant_race_1 <- 0
+dat[dat$applicant_race_1 == 7, ]$applicant_race_1 <- 0
+names(dat)[names(dat) == "applicant_race_1"] <- "applicant_race"
+# co-applicant
+dat[dat$co_applicant_ethnicity == 2, ]$co_applicant_ethnicity <- 1
+dat[dat$co_applicant_ethnicity == 3, ]$co_applicant_ethnicity <- 0
+dat[dat$co_applicant_ethnicity == 4, ]$co_applicant_ethnicity <- 0
+dat[dat$co_applicant_ethnicity == 5, ]$co_applicant_ethnicity <- 0
+names(dat)[names(dat) == "co_applicant_ethnicity"] <- "co_applicant"
+# Change classes of variables
 dat <- map_dfr(dat, as.factor)
 #dat[sapply(dat, is.numeric)] <- lapply(dat[sapply(dat, is.numeric)], as.factor)
 dat$loan_amount_000s = as.numeric(dat$loan_amount_000s)
 dat$hud_median_family_income = as.numeric(dat$hud_median_family_income)
 dat$tract_to_msamd_income = as.numeric(dat$tract_to_msamd_income)
-dat$msamd = as.numeric(dat$msamd)
+#dat$msamd = as.numeric(dat$msamd)
 dat$applicant_income_000s <- as.numeric(dat$applicant_income_000s)
 dat$population = as.numeric(dat$population)
 dat$number_of_owner_occupied_units = as.numeric(dat$number_of_owner_occupied_units)
 dat$number_of_1_to_4_family_units = as.numeric(dat$number_of_1_to_4_family_units)
 dat$minority_population = as.numeric(dat$minority_population)
+# Model
 full <- glm(action_taken ~., family = binomial(link = 'logit'), data = dat)
 summary(fit)
-set.seed(123456)
-cv.lasso <- cv.glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial")
-model <- glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+#set.seed(123456)
+#cv.lasso <- cv.glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial")
+#model <- glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
 ```
 ```{r}
 dat %>%
@@ -56,18 +80,18 @@ summary(bothways)
 ```{r}
 # test, Confusion Matrix, ROC curve
 # for training set
-#train.prob <- predict(bothways, training, type = "response")
-#train.pred <- as.numeric(ifelse(train.prob > 0.5, 1, 0))
-#confusionMatrix(data = as.factor(train.pred), reference = training$death_yn, positive = "1")
-#train.roc <- roc(training$death_yn ~ train.prob, plot = TRUE, print.auc = TRUE)
+train.prob <- predict(full, dat, type = "response")
+train.pred <- as.numeric(ifelse(train.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(train.pred), reference = dat$action_taken, positive = "1")
+train.roc <- roc(dat$action_taken ~ train.prob, plot = TRUE, print.auc = TRUE)
 
 # for testing set
-test.prob <- predict(bothways, testing, type = "response")
-test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
-confusionMatrix(data = as.factor(test.pred), reference = testing$death_yn, positive = "1")
+#test.prob <- predict(full, testing, type = "response")
+#test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+#confusionMatrix(data = as.factor(test.pred), reference = testing$death_yn, positive = "1")
 
-test.roc <- roc(testing$death_yn ~ test.prob, plot = TRUE, print.auc = TRUE)
-as.numeric(test.roc$auc)
+#test.roc <- roc(testing$death_yn ~ test.prob, plot = TRUE, print.auc = TRUE)
+#as.numeric(test.roc$auc)
 
 # a comparison between final model & a arbitrary model
 #arb <- glm(death_yn ~ sex + race,family = binomial(link = 'logit'), data = training)
