@@ -43,11 +43,9 @@ dat[dat$co_applicant_ethnicity == 5, ]$co_applicant_ethnicity <- 0
 names(dat)[names(dat) == "co_applicant_ethnicity"] <- "co_applicant"
 # Change classes of variables
 dat <- map_dfr(dat, as.factor)
-#dat[sapply(dat, is.numeric)] <- lapply(dat[sapply(dat, is.numeric)], as.factor)
 dat$loan_amount_000s = as.numeric(dat$loan_amount_000s)
 dat$hud_median_family_income = as.numeric(dat$hud_median_family_income)
 dat$tract_to_msamd_income = as.numeric(dat$tract_to_msamd_income)
-#dat$msamd = as.numeric(dat$msamd)
 dat$applicant_income_000s <- as.numeric(dat$applicant_income_000s)
 dat$population = as.numeric(dat$population)
 dat$number_of_owner_occupied_units = as.numeric(dat$number_of_owner_occupied_units)
