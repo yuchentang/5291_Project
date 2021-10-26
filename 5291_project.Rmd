@@ -10,8 +10,76 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 library(VIM)
-data <- read_csv("data/hmda_2017_ny_all-records_labels.csv")
-data <- subset(data, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19, 21:24,33:40,43:50,56:64,69:71,78))
-aggr(data)
+library(glmnet)
+dat <- read_csv("/Users/yctang/Documents/Columbia/5291 Advanced data Analysis/project/data/hmda_2017_ny_all-records_labels.csv")
+#aggr(dat)
+dat <- subset(dat, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19, 21:27, 29, 31, 33:50, 51, 53, 54, 56:71, 69:71, 78))
+dat = dat %>% filter(action_taken == 1 | action_taken == 2 | action_taken == 3)
+#aggr(dat)
+dat <- drop_na(dat)
+dat[dat$action_taken == 2, ]$action_taken <- 1
+dat[dat$action_taken == 3, ]$action_taken <- 0
+dat <- map_dfr(dat, as.factor)
+#dat[sapply(dat, is.numeric)] <- lapply(dat[sapply(dat, is.numeric)], as.factor)
+dat$loan_amount_000s = as.numeric(dat$loan_amount_000s)
+dat$hud_median_family_income = as.numeric(dat$hud_median_family_income)
+dat$tract_to_msamd_income = as.numeric(dat$tract_to_msamd_income)
+dat$msamd = as.numeric(dat$msamd)
+dat$applicant_income_000s <- as.numeric(dat$applicant_income_000s)
+dat$population = as.numeric(dat$population)
+dat$number_of_owner_occupied_units = as.numeric(dat$number_of_owner_occupied_units)
+dat$number_of_1_to_4_family_units = as.numeric(dat$number_of_1_to_4_family_units)
+dat$minority_population = as.numeric(dat$minority_population)
+full <- glm(action_taken ~., family = binomial(link = 'logit'), data = dat)
+summary(fit)
+set.seed(123456)
+cv.lasso <- cv.glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial")
+model <- glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+```
+```{r}
+dat %>%
+  ggplot(aes(action_taken, fill = action_taken)) + 
+  geom_bar()
+dat %>%
+  ggplot(aes(agency_code, fill = agency_code)) + 
+  geom_bar()
+```
+
+
+```{r}
+null <- glm(action_taken ~ 1, family = binomial(link = 'logit'), data = dat)
+bothways = step(null, list(lower = formula(null), upper = formula(full)), direction = "both", trace = 0)
+formula(bothways)
+summary(bothways)
+```
+
+```{r}
+# test, Confusion Matrix, ROC curve
+# for training set
+#train.prob <- predict(bothways, training, type = "response")
+#train.pred <- as.numeric(ifelse(train.prob > 0.5, 1, 0))
+#confusionMatrix(data = as.factor(train.pred), reference = training$death_yn, positive = "1")
+#train.roc <- roc(training$death_yn ~ train.prob, plot = TRUE, print.auc = TRUE)
+
+# for testing set
+test.prob <- predict(bothways, testing, type = "response")
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred), reference = testing$death_yn, positive = "1")
+
+test.roc <- roc(testing$death_yn ~ test.prob, plot = TRUE, print.auc = TRUE)
+as.numeric(test.roc$auc)
+
+# a comparison between final model & a arbitrary model
+#arb <- glm(death_yn ~ sex + race,family = binomial(link = 'logit'), data = training)
+#test.prob.arb <- predict(arb, testing, type = "response")
+#test.pred.arb <- as.numeric(ifelse(test.prob.arb > 0.5, 1, 0))
+#confusionMatrix(data = as.factor(test.pred.arb), reference = testing$death_yn, positive = "1")
+#test.roc.full <- roc(testing$death_yn ~ test.prob.arb, plot = TRUE, print.auc = TRUE)
+
+#roc1 <- roc(testing$death_yn, test.prob)
+#roc2 <- roc(testing$death_yn, test.prob.arb)
+#plot(roc, print.thres = "best", col = "red", main = "ROC Comparison", print.auc = TRUE)
+#plot(roc, print.thres = c(0.5), add = TRUE, col = "red")
+#plot(roc2, add = TRUE, col = "blue", print.auc = TRUE, print.auc.x = 4, print.auc.y = 2)
 ```
 
