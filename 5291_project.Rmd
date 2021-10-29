@@ -7,15 +7,31 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, message = FALSE}
 library(tidyverse)
-library(VIM)
 library(glmnet)
+library(caret)
+library(pROC)
+library(VIM)
+#library(performanceEstimation)
+#library(mlr)
+library(UBL)
+```
+
+```{r}
 dat <- read_csv("/Users/yctang/Documents/Columbia/5291 Advanced data Analysis/project/data/hmda_2017_ny_all-records_labels.csv")
-#aggr(dat)
+# remove some variables & NA
 dat <- subset(dat, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19:27, 29, 31, 33:50, 51, 53, 54, 56:71, 69:71, 78))
-#aggr(dat)
+aggr(dat)
+```
+
+## Data Pre-processing
+
+```{r}
+# drop missing values
 dat <- drop_na(dat)
+
+# some adjustments: re-encoding
 # owner_occupancy: unknown == 0
 dat[dat$owner_occupancy == 3, ]$owner_occupancy <- 0
 # preapproval: not requested == 0
@@ -28,7 +44,7 @@ dat[dat$action_taken == 3, ]$action_taken <- 0
 # applicant_ethnicity: unknown == 0, hispanic/latino == 1, non hispanic/latino == 2
 dat[dat$applicant_ethnicity == 3, ]$applicant_ethnicity <- 0
 dat[dat$applicant_ethnicity == 4, ]$applicant_ethnicity <- 0
-# xex: unknown == 0, male == 1, female == 2
+# sex: unknown == 0, male == 1, female == 2
 dat[dat$applicant_sex == 3, ]$applicant_sex <- 0
 dat[dat$applicant_sex == 4, ]$applicant_sex <- 0
 # race: unknown == 0
@@ -41,67 +57,156 @@ dat[dat$co_applicant_ethnicity == 3, ]$co_applicant_ethnicity <- 0
 dat[dat$co_applicant_ethnicity == 4, ]$co_applicant_ethnicity <- 0
 dat[dat$co_applicant_ethnicity == 5, ]$co_applicant_ethnicity <- 0
 names(dat)[names(dat) == "co_applicant_ethnicity"] <- "co_applicant"
+
 # Change classes of variables
-dat <- map_dfr(dat, as.factor)
-dat$loan_amount_000s = as.numeric(dat$loan_amount_000s)
-dat$hud_median_family_income = as.numeric(dat$hud_median_family_income)
-dat$tract_to_msamd_income = as.numeric(dat$tract_to_msamd_income)
-dat$applicant_income_000s <- as.numeric(dat$applicant_income_000s)
-dat$population = as.numeric(dat$population)
-dat$number_of_owner_occupied_units = as.numeric(dat$number_of_owner_occupied_units)
-dat$number_of_1_to_4_family_units = as.numeric(dat$number_of_1_to_4_family_units)
-dat$minority_population = as.numeric(dat$minority_population)
-# Model
-full <- glm(action_taken ~., family = binomial(link = 'logit'), data = dat)
-summary(fit)
-#set.seed(123456)
-#cv.lasso <- cv.glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial")
-#model <- glmnet(dat[-8], dat$action_taken, alpha = 1, family = "binomial", lambda = cv.lasso$lambda.min)
+dat$agency_code <- as.factor(dat$agency_code)
+dat$loan_type <- as.factor(dat$loan_type)
+dat$property_type <- as.factor(dat$property_type)
+dat$loan_purpose <- as.factor(dat$loan_purpose)
+dat$owner_occupancy <- as.factor(dat$owner_occupancy)
+dat$preapproval <- as.factor(dat$preapproval)
+dat$action_taken <- as.factor(dat$action_taken)
+dat$applicant_ethnicity <- as.factor(dat$applicant_ethnicity)
+dat$co_applicant <- as.factor(dat$co_applicant)
+dat$applicant_race <- as.factor(dat$applicant_race)
+dat$applicant_sex <- as.factor(dat$applicant_sex)
 ```
+
+## Data Visualization
+
 ```{r}
 dat %>%
   ggplot(aes(action_taken, fill = action_taken)) + 
-  geom_bar()
-dat %>%
-  ggplot(aes(agency_code, fill = agency_code)) + 
-  geom_bar()
+  geom_bar()+
+  scale_y_continuous(labels = scales::percent)
+
+ggplot(dat, aes(x = action_taken)) + 
+    geom_bar(aes(y = (..count..)/sum(..count..))) + 
+    scale_y_continuous(formatter = 'percent')
+
+dat%>%
+  ggplot(aes(x = action_taken)) + 
+    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat = "count") +
+    geom_text(aes(label = scales::percent(..prop..),
+                   y= ..prop.. ), stat = "count", vjust = -.5) +
+    labs(y = "Percent", fill = "day") +
+    scale_y_continuous(labels = scales::percent)
 ```
 
+## Training-testing Set Split
 
 ```{r}
-null <- glm(action_taken ~ 1, family = binomial(link = 'logit'), data = dat)
-bothways = step(null, list(lower = formula(null), upper = formula(full)), direction = "both", trace = 0)
-formula(bothways)
-summary(bothways)
+set.seed(123456)
+indices <- sample(1:nrow(dat), nrow(dat) * 0.7)
+training <- dat[indices, ]
+testing <- dat[-indices, ]
+```
+
+## First Try: Logistic Regression
+
+```{r}
+full <- glm(action_taken ~., family = binomial(link = 'logit'), data = training)
+#summary(fit)
+test.prob <- predict(full, testing, type = "response")
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, positive = "1")
+test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
+```
+
+## Outliers, standardization and other adjustments
+
+```{r}
+# outliers & standardization
+hist(dat$applicant_income_000s)
+plot(density(dat$population[dat$population<quantile(dat$population, 0.99)]))
+lines(density(dat$applicant_income_000s[dat$applicant_income_000s<quantile(dat$applicant_income_000s, 0.99)]))
+
+dat <- dat %>%
+  filter(applicant_income_000s < quantile(applicant_income_000s, 0.96)) %>%
+  filter(loan_amount_000s < quantile(loan_amount_000s, 0.96)) %>%
+  mutate(applicant_income = scale(applicant_income_000s, center = FALSE), 
+         loan_amount = scale(loan_amount_000s, center = FALSE), 
+         population = scale(population, center = FALSE), 
+         hud_median_family_income = scale(hud_median_family_income, center = FALSE), 
+         number_of_owner_occupied_units = scale(number_of_owner_occupied_units, center = FALSE), 
+         number_of_1_to_4_family_units = scale(number_of_1_to_4_family_units, center = FALSE), 
+         minority_population = minority_population / 100, 
+         tract_to_msamd_income = tract_to_msamd_income / 100) %>%
+  select(-c(applicant_income_000s, loan_amount_000s)) %>%
+  select(action_taken, everything())
+hist(dat$applicant_income)
+plot(density(dat$population))
+lines(density(dat$applicant_income))
+plot(density(dat$population[dat$population<quantile(dat$population, 0.99)]))
+lines(density(dat$applicant_income[dat$applicant_income<quantile(dat$applicant_income, 0.99)]))
+```
+
+## Second Try: Logistic Regression
+
+```{r}
+training <- dat[indices, ]
+testing <- dat[-indices, ]
+full <- glm(action_taken ~., family = binomial(link = 'logit'), data = training)
+#summary(fit)
+test.prob <- predict(full, testing, type = "response")
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, positive = "1")
+test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
+```
+
+## SMOTE & L1 Regularization
+
+```{r}
+# generate dummy variables manually
+training.dummy <- data.frame(model.matrix( ~ ., training)[, -1])
+testing.dummy <- data.frame(model.matrix( ~ ., testing)[, -1])
+# there may be problems with too much data!!! so sample again
+training.dummy <- sample_n(training.dummy, 10000)
+newData <- SmoteRegress(action_taken1 ~ ., training.dummy)
+X <- as.matrix(newData[-1])
+Y <- newData$action_taken1
+cv <- cv.glmnet(X, Y, family = "binomial")
+fit.L1 <- glmnet(X, Y, family = "binomial", alpha = 1, lambda = cv$lambda.min)
+# confusion matrix and roc curve
+test.prob <- fit.L1 %>% predict(newx = as.matrix(testing.dummy[-1]))
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+mean(test.pred == testing.dummy$action_taken1)
+confusionMatrix(data = as.factor(test.pred), reference = factor(testing.dummy$action_taken1), positive = "1")
+test.roc <- roc(testing.dummy$action_taken1 ~ as.numeric(test.prob), plot = TRUE, print.auc = TRUE)
+```
+
+## 乱七八糟瞎try
+
+## Try: Neural Network
+
+```{r, message = FALSE}
+library(neuralnet)
 ```
 
 ```{r}
-# test, Confusion Matrix, ROC curve
-# for training set
-train.prob <- predict(full, dat, type = "response")
-train.pred <- as.numeric(ifelse(train.prob > 0.5, 1, 0))
-confusionMatrix(data = as.factor(train.pred), reference = dat$action_taken, positive = "1")
-train.roc <- roc(dat$action_taken ~ train.prob, plot = TRUE, print.auc = TRUE)
-
-# for testing set
-#test.prob <- predict(full, testing, type = "response")
-#test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
-#confusionMatrix(data = as.factor(test.pred), reference = testing$death_yn, positive = "1")
-
-#test.roc <- roc(testing$death_yn ~ test.prob, plot = TRUE, print.auc = TRUE)
-#as.numeric(test.roc$auc)
-
-# a comparison between final model & a arbitrary model
-#arb <- glm(death_yn ~ sex + race,family = binomial(link = 'logit'), data = training)
-#test.prob.arb <- predict(arb, testing, type = "response")
-#test.pred.arb <- as.numeric(ifelse(test.prob.arb > 0.5, 1, 0))
-#confusionMatrix(data = as.factor(test.pred.arb), reference = testing$death_yn, positive = "1")
-#test.roc.full <- roc(testing$death_yn ~ test.prob.arb, plot = TRUE, print.auc = TRUE)
-
-#roc1 <- roc(testing$death_yn, test.prob)
-#roc2 <- roc(testing$death_yn, test.prob.arb)
-#plot(roc, print.thres = "best", col = "red", main = "ROC Comparison", print.auc = TRUE)
-#plot(roc, print.thres = c(0.5), add = TRUE, col = "red")
-#plot(roc2, add = TRUE, col = "blue", print.auc = TRUE, print.auc.x = 4, print.auc.y = 2)
+NN = neuralnet(action_taken1 ~ ., newData, hidden = 5, linear.output = FALSE, stepmax = 1e5)
+plot(NN)
+predict_NN = compute(NN, testing.dummy[-1])
+test.pred <- as.numeric(ifelse(predict_NN$net.result > 0.5, 1, 0))
+mean(test.pred == testing.dummy$action_taken1)
+confusionMatrix(data = as.factor(test.pred), reference = factor(testing.dummy$action_taken1), positive = "1")
+test.roc <- roc(testing.dummy$action_taken1 ~ predict_NN$net.result, plot = TRUE, print.auc = TRUE)
 ```
+
+```{r}
+library(h2o)
+y <- "action_taken1"
+x <- setdiff(names(training.dummy), y)
+
+# For binary classification, response should be a factor
+training.dummy[, y] <- as.factor(training.dummy[, y])
+testing.dummy[, y] <- as.factor(testing.dummy[, y])
+
+# Run AutoML for 20 base models
+aml <- h2o.automl(x = x, y = y,
+                  training_frame = training.dummy,
+                  max_models = 20,
+                  seed = 1)
+```
+
 
