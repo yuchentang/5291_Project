@@ -1,6 +1,8 @@
 ---
 title: "5291_project"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include = FALSE}
@@ -15,14 +17,14 @@ library(pROC)
 library(VIM)
 #library(performanceEstimation)
 #library(mlr)
-library(UBL)
+#library(UBL)
 ```
 
 ```{r}
-dat <- read_csv("/Users/yctang/Documents/Columbia/5291 Advanced data Analysis/project/data/hmda_2017_ny_all-records_labels.csv")
+dat <- read.csv("/Users/yctang/Documents/Columbia/Fall2021/5291 Advanced data Analysis/project/data/hmda_2017_ny_all-records_labels.csv")
 # remove some variables & NA
 dat <- subset(dat, select = -c(1:4, 6, 8, 10, 12, 15, 17, 19:27, 29, 31, 33:50, 51, 53, 54, 56:71, 69:71, 78))
-aggr(dat)
+#aggr(dat)
 ```
 
 ## Data Pre-processing
@@ -32,8 +34,13 @@ aggr(dat)
 dat <- drop_na(dat)
 
 # some adjustments: re-encoding
-# owner_occupancy: unknown == 0
+# owner_occupancy: other == 0, Owner-occupied as a principal dwelling == 1
+dat[dat$owner_occupancy == 2, ]$owner_occupancy <- 0
 dat[dat$owner_occupancy == 3, ]$owner_occupancy <- 0
+# loan_type: other == 0, Conventional == 1
+dat[dat$loan_type == 2, ]$loan_type <- 0
+dat[dat$loan_type == 3, ]$loan_type <- 0
+dat[dat$loan_type == 4, ]$loan_type <- 0
 # preapproval: not requested == 0
 dat[dat$preapproval == 2, ]$preapproval <- 0
 dat[dat$preapproval == 3, ]$preapproval <- 0
@@ -41,17 +48,23 @@ dat[dat$preapproval == 3, ]$preapproval <- 0
 dat = dat %>% filter(action_taken == 1 | action_taken == 2 | action_taken == 3)
 dat[dat$action_taken == 2, ]$action_taken <- 1
 dat[dat$action_taken == 3, ]$action_taken <- 0
-# applicant_ethnicity: unknown == 0, hispanic/latino == 1, non hispanic/latino == 2
+# applicant_ethnicity: other == 0, hispanic/latino == 1
+dat[dat$applicant_ethnicity == 2, ]$applicant_ethnicity <- 0
 dat[dat$applicant_ethnicity == 3, ]$applicant_ethnicity <- 0
 dat[dat$applicant_ethnicity == 4, ]$applicant_ethnicity <- 0
 # sex: unknown == 0, male == 1, female == 2
 dat[dat$applicant_sex == 3, ]$applicant_sex <- 0
 dat[dat$applicant_sex == 4, ]$applicant_sex <- 0
-# race: unknown == 0
+# race: other == 0, asian == 1, Black or African American == 2, white == 3
+dat[dat$applicant_race_1 == 1, ]$applicant_race_1 <- 0
+dat[dat$applicant_race_1 == 4, ]$applicant_race_1 <- 0
 dat[dat$applicant_race_1 == 6, ]$applicant_race_1 <- 0
 dat[dat$applicant_race_1 == 7, ]$applicant_race_1 <- 0
+dat[dat$applicant_race_1 == 2, ]$applicant_race_1 <- 1
+dat[dat$applicant_race_1 == 3, ]$applicant_race_1 <- 2
+dat[dat$applicant_race_1 == 5, ]$applicant_race_1 <- 3
 names(dat)[names(dat) == "applicant_race_1"] <- "applicant_race"
-# co-applicant
+# co-applicant, yes/no == 1/0
 dat[dat$co_applicant_ethnicity == 2, ]$co_applicant_ethnicity <- 1
 dat[dat$co_applicant_ethnicity == 3, ]$co_applicant_ethnicity <- 0
 dat[dat$co_applicant_ethnicity == 4, ]$co_applicant_ethnicity <- 0
@@ -80,37 +93,30 @@ dat %>%
   geom_bar()+
   scale_y_continuous(labels = scales::percent)
 
-ggplot(dat, aes(x = action_taken)) + 
-    geom_bar(aes(y = (..count..)/sum(..count..))) + 
-    scale_y_continuous(formatter = 'percent')
+#ggplot(dat, aes(x = action_taken)) + 
+#    geom_bar(aes(y = (..count..)/sum(..count..))) + 
+#    scale_y_continuous(formatter = 'percent')
 
-dat%>%
-  ggplot(aes(x = action_taken)) + 
-    geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat = "count") +
-    geom_text(aes(label = scales::percent(..prop..),
-                   y= ..prop.. ), stat = "count", vjust = -.5) +
-    labs(y = "Percent", fill = "day") +
-    scale_y_continuous(labels = scales::percent)
 ```
 
 ## Training-testing Set Split
 
 ```{r}
 set.seed(123456)
-indices <- sample(1:nrow(dat), nrow(dat) * 0.7)
-training <- dat[indices, ]
-testing <- dat[-indices, ]
+indices.old <- sample(1:nrow(dat), nrow(dat) * 0.7)
+training.old <- dat[indices.old, ]
+testing.old <- dat[-indices.old, ]
 ```
 
 ## First Try: Logistic Regression
 
 ```{r}
-full <- glm(action_taken ~., family = binomial(link = 'logit'), data = training)
+full <- glm(action_taken ~., family = binomial(link = 'logit'), data = training.old)
 #summary(fit)
-test.prob <- predict(full, testing, type = "response")
+test.prob <- predict(full, testing.old, type = "response")
 test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
-confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, positive = "1")
-test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
+confusionMatrix(data = as.factor(test.pred), reference = testing.old$action_taken, positive = "1")
+test.roc <- roc(testing.old$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
 ```
 
 ## Outliers, standardization and other adjustments
@@ -118,22 +124,24 @@ test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
 ```{r}
 # outliers & standardization
 hist(dat$applicant_income_000s)
-plot(density(dat$population[dat$population<quantile(dat$population, 0.99)]))
-lines(density(dat$applicant_income_000s[dat$applicant_income_000s<quantile(dat$applicant_income_000s, 0.99)]))
+plot(density(dat$population[dat$population < quantile(dat$population, 0.99)]))
+lines(density(dat$applicant_income_000s[dat$applicant_income_000s < quantile(dat$applicant_income_000s, 0.99)]))
 
 dat <- dat %>%
   filter(applicant_income_000s < quantile(applicant_income_000s, 0.96)) %>%
   filter(loan_amount_000s < quantile(loan_amount_000s, 0.96)) %>%
-  mutate(applicant_income = scale(applicant_income_000s, center = FALSE), 
-         loan_amount = scale(loan_amount_000s, center = FALSE), 
-         population = scale(population, center = FALSE), 
-         hud_median_family_income = scale(hud_median_family_income, center = FALSE), 
-         number_of_owner_occupied_units = scale(number_of_owner_occupied_units, center = FALSE), 
-         number_of_1_to_4_family_units = scale(number_of_1_to_4_family_units, center = FALSE), 
-         minority_population = minority_population / 100, 
-         tract_to_msamd_income = tract_to_msamd_income / 100) %>%
-  select(-c(applicant_income_000s, loan_amount_000s)) %>%
-  select(action_taken, everything())
+  mutate(applicant_income = as.numeric(scale(applicant_income_000s, center = FALSE)), 
+         loan_amount = as.numeric(scale(loan_amount_000s, center = FALSE)), 
+         population = as.numeric(scale(population, center = FALSE)), 
+         hud_median_family_income = as.numeric(scale(hud_median_family_income, center = FALSE)),
+         number_of_owner_occupied_units = as.numeric(scale(number_of_owner_occupied_units, center = FALSE)),
+         number_of_1_to_4_family_units = as.numeric(scale(number_of_1_to_4_family_units, center = FALSE)),
+         minority_population = minority_population / 100,
+         tract_to_msamd_income = tract_to_msamd_income / 100
+         ) %>%
+  dplyr::select(-c(applicant_income_000s, loan_amount_000s)) %>%
+  dplyr::select(action_taken, everything())
+
 hist(dat$applicant_income)
 plot(density(dat$population))
 lines(density(dat$applicant_income))
@@ -144,6 +152,9 @@ lines(density(dat$applicant_income[dat$applicant_income<quantile(dat$applicant_i
 ## Second Try: Logistic Regression
 
 ```{r}
+set.seed(123456)
+dat <- sample_n(dat, 1000)
+indices <- sample(1:nrow(dat), nrow(dat) * 0.7)
 training <- dat[indices, ]
 testing <- dat[-indices, ]
 full <- glm(action_taken ~., family = binomial(link = 'logit'), data = training)
@@ -154,17 +165,28 @@ confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, p
 test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
 ```
 
-## SMOTE & L1 Regularization
+## SMOTE-NC & L-1 Regularization
 
 ```{r}
-# generate dummy variables manually
-training.dummy <- data.frame(model.matrix( ~ ., training)[, -1])
+# install the RSBID package
+#install.packages("devtools")
+#devtools::install_github("dongyuanwu/RSBID")
+library(RSBID)
+#training.dummy$action_taken1 <- as.factor(training.dummy$action_taken1)
+#testing.dummy$action_taken1 <- as.factor(testing.dummy$action_taken1)
+
+# too slow! sample 50000 for testing
+#set.seed(123456)
+#training <- sample_n(training, 50000)
+
+ptm <- proc.time()
+training.bal <- SMOTE_NC(training, "action_taken")
+proc.time() - ptm # running time
+
+training.bal.dummy <- data.frame(model.matrix( ~ ., training.bal)[, -1])
 testing.dummy <- data.frame(model.matrix( ~ ., testing)[, -1])
-# there may be problems with too much data!!! so sample again
-training.dummy <- sample_n(training.dummy, 10000)
-newData <- SmoteRegress(action_taken1 ~ ., training.dummy)
-X <- as.matrix(newData[-1])
-Y <- newData$action_taken1
+X <- as.matrix(training.bal.dummy[-1])
+Y <- training.bal.dummy$action_taken1
 cv <- cv.glmnet(X, Y, family = "binomial")
 fit.L1 <- glmnet(X, Y, family = "binomial", alpha = 1, lambda = cv$lambda.min)
 # confusion matrix and roc curve
@@ -184,7 +206,10 @@ library(neuralnet)
 ```
 
 ```{r}
-NN = neuralnet(action_taken1 ~ ., newData, hidden = 5, linear.output = FALSE, stepmax = 1e5)
+ptm <- proc.time()
+set.seed(123456)
+NN = neuralnet(action_taken1 ~ ., training.bal.dummy, hidden = 5, linear.output = FALSE, err.fct = 'ce', stepmax = 1e7)
+proc.time() - ptm # running time
 plot(NN)
 predict_NN = compute(NN, testing.dummy[-1])
 test.pred <- as.numeric(ifelse(predict_NN$net.result > 0.5, 1, 0))
@@ -193,20 +218,133 @@ confusionMatrix(data = as.factor(test.pred), reference = factor(testing.dummy$ac
 test.roc <- roc(testing.dummy$action_taken1 ~ predict_NN$net.result, plot = TRUE, print.auc = TRUE)
 ```
 
+## FAMD
+
 ```{r}
-library(h2o)
-y <- "action_taken1"
-x <- setdiff(names(training.dummy), y)
+library(FactoMineR)
+library(factoextra)
+options(ggrepel.max.overlaps = Inf)
 
-# For binary classification, response should be a factor
-training.dummy[, y] <- as.factor(training.dummy[, y])
-testing.dummy[, y] <- as.factor(testing.dummy[, y])
+# unbalanced
+famd1 <- FAMD(training[, -1], ncp = 8)
+training.famd <- data.frame(famd1$ind$coord)
+training.famd$action_taken <- training$action_taken
+testing.famd <- data.frame(predict.FAMD(famd1, testing[, -1])$coord)
+testing.famd$action_taken <- testing$action_taken
+#balanced
+famd2 <- FAMD(training.bal[, -1], ncp = 8)
+training.bal.famd <- data.frame(famd2$ind$coord)
+training.bal.famd$action_taken <- training.bal$action_taken
+testing.bal.famd <- data.frame(predict.FAMD(famd2, testing[, -1])$coord)
+testing.bal.famd$action_taken <- testing$action_taken
 
-# Run AutoML for 20 base models
-aml <- h2o.automl(x = x, y = y,
-                  training_frame = training.dummy,
-                  max_models = 20,
-                  seed = 1)
+# FAMD unbalanced training set
+full <- glm(action_taken ~ ., family = binomial(link = "logit"), data = training.famd)
+test.prob <- predict(full, testing.famd, type = "response")
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, positive = "1")
+test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
+
+# FAMD balanced training set
+full <- glm(action_taken ~ ., family = binomial(link = "logit"), data = training.bal.famd)
+test.prob <- predict(full, testing.bal.famd, type = "response")
+test.pred <- as.numeric(ifelse(test.prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred), reference = testing$action_taken, positive = "1")
+test.roc <- roc(testing$action_taken ~ test.prob, plot = TRUE, print.auc = TRUE)
 ```
 
+
+## Random Forest
+
+```{r}
+library(randomForest)
+# class of label/dependent variables should be `factor` -> classification
+#training.bal.dummy$action_taken1 <- as.factor(training.bal.dummy$action_taken1)
+rf_model <- randomForest(action_taken ~ ., data = training.bal, proximity = TRUE)
+print(rf_model)
+# type = "prob" -> gets the probability
+rf_prob <- predict(rf_model, testing, type = "prob")[, 2]
+
+test.pred.rf <- as.numeric(ifelse(rf_prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred.rf), reference = testing$action_taken, positive = "1")
+test.rf.roc <- roc(testing$action_taken ~ rf_prob, plot = TRUE, print.auc = TRUE)
+
+importance(rf_model)
+
+# RandomForest based on famd balanced data
+rf_model2 <- randomForest(action_taken ~ ., data = training.bal.famd, proximity = TRUE)
+print(rf_model2)
+rf_prob <- predict(rf_model2, testing.bal.famd, type = "prob")[, 2]
+
+test.pred.rf <- as.numeric(ifelse(rf_prob > 0.5, 1, 0))
+confusionMatrix(data = as.factor(test.pred.rf), reference = testing$action_taken, positive = "1")
+test.rf.roc <- roc(testing$action_taken ~ rf_prob, plot = TRUE, print.auc = TRUE)
+```
+
+### XGBOOST
+
+```{r}
+library(xgboost)
+testing_label <- testing[, 1] #define testing label(copy from below lines)
+training_sparse <- sparse.model.matrix(action_taken ~ . - 1, training.bal)
+training_label <- training.bal[, 1]
+train_matrix <- xgb.DMatrix(data = training_sparse, label = as.numeric(training_label) - 1)
+testing_sparse <- sparse.model.matrix(action_taken ~ . - 1, testing)
+test_matrix <- xgb.DMatrix(data = testing_sparse, label = as.numeric(testing_label) - 1)
+
+params <- list(booster = "gbtree", objective = "binary:logistic", eta = 0.3, gamma = 0, max_depth = 6, min_child_weight = 1, subsample = 1, colsample_bytree = 1)
+xgb.cv <- xgb.cv(params = params, data = train_matrix, nfold = 5, nrounds = 100)
+##best iteration =
+
+xgb1 <- xgb.train(params = params, data = train_matrix, nrounds = 100, watchlist = list(val = test_matrix, train=train_matrix), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric = "error")
+
+xgb.prob <- predict(xgb1, test_matrix)
+xgb.pred <- ifelse (xgb.prob > 0.5, 1, 0)
+confusionMatrix(data = as.factor(xgb.pred), reference = testing_label, positive = "1")
+test.rf.roc <- roc(testing$action_taken ~ xgb.prob, plot = TRUE, print.auc = TRUE)
+
+mat1 <- xgb.importance(feature_names = colnames(training_sparse), model = xgb1)
+xgb.plot.importance(importance_matrix = mat1)
+
+# xgboost based on famd balanced training data
+
+training_sparse <- sparse.model.matrix(action_taken ~ . - 1, training.bal.famd)
+training_label <- training.bal[, 1]
+train_matrix <- xgb.DMatrix(data = training_sparse, label = as.numeric(training_label) - 1)
+testing_sparse <- sparse.model.matrix(action_taken ~ . - 1, testing.bal.famd)
+testing_label <- testing[, 1]
+test_matrix <- xgb.DMatrix(data = testing_sparse, label = as.numeric(testing_label) - 1)
+
+params <- list(booster = "gbtree", objective = "binary:logistic", eta = 0.3, gamma = 0, max_depth = 6, min_child_weight = 1, subsample = 1, colsample_bytree = 1)
+xgb.cv <- xgb.cv(params = params, data = train_matrix, nfold = 5, nrounds = 100)
+##best iteration =
+
+xgb2 <- xgb.train(params = params, data = train_matrix, nrounds = 100, watchlist = list(val = test_matrix, train=train_matrix), print_every_n = 10, early_stop_round = 10, maximize = F , eval_metric = "error")
+
+xgb.prob <- predict(xgb2, test_matrix)
+xgb.pred <- ifelse(xgb.prob > 0.5, 1, 0)
+confusionMatrix(data = as.factor(xgb.pred), reference = testing_label, positive = "1")
+test.rf.roc <- roc(testing$action_taken ~ xgb.prob, plot = TRUE, print.auc = TRUE)
+
+mat2 <- xgb.importance(feature_names = colnames(training_sparse), model = xgb2)
+xgb.plot.importance(importance_matrix = mat2)
+```
+
+### SVM
+
+```{r}
+library(e1071)
+tune.out <- e1071::tune(svm,action_taken1 ~ ., data = training.bal.dummy, kernel = "linear", ranges = list(cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100)))
+# extract the best model
+(bestmod <- tune.out$best.model)
+
+svmfit = e1071::svm(action_taken1 ~ ., data = training.bal.dummy, kernel = "linear", cost = 0.001, scale = FALSE)
+
+probs <- predict(svmfit, testing.dummy)
+preds <- as.numeric(ifelse(probs > 0.5, 1, 0))
+
+confusionMatrix(data = as.factor(preds), reference = as.factor(testing.dummy$action_taken1), positive = "1")
+
+test.roc <- roc(testing.dummy$action_taken1 ~ probs, plot = TRUE, print.auc = TRUE)
+```
 
